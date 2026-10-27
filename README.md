@@ -4,7 +4,7 @@ Voir les images d'un dossier (et sous dossier) et pouvoir les convertir
 
 ++ Fonctionne sur PC et Androïd (Apple non testé)
 
-### Formats supportés :
+### Formats d'export supportés :
 - PNG
 - JPG
 - WEBP
