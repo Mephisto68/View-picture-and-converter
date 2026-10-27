@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Galerie des images d'un dossier local</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #000; color: #fff; }
+        .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+        .img-wrapper { display: flex; flex-direction: column; align-items: center; }
+        .img-wrapper img { width: 100%; height: auto; border-radius: 4px; cursor: pointer; }
+        .file-label { text-align: center; font-size: 12px; color: #aaa; margin-top: 4px; word-break: break-all; }
+        .section-title {
+            grid-column: 1 / -1;
+            font-size: 18px;
+            font-weight: bold;
+            color: #4a90d9;
+            border-bottom: 4px solid #4a90d9;
+            padding-bottom: 6px;
+            margin-top: 40px;
+        }
+        .lightbox {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.9);
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            flex-direction: column;
+        }
+        .lightbox img {
+            pointer-events: auto;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            -webkit-user-drag: none;
+        }
+        .lightbox .lightbox-label {
+            color: #ccc;
+            font-size: 14px;
+            margin-top: 12px;
+            word-break: break-all;
+            text-align: center;
+        }
+        .lightbox.active { display: flex; }
+
+        .export-bar {
+            margin-top: 16px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            cursor: default;
+        }
+        .export-bar button {
+            padding: 6px 14px;
+            border-radius: 4px;
+            border: none;
+            font-size: 14px;
+            color: #fff;
+            cursor: pointer;
+        }
+        .btn-download { background: #4a90d9; }
+        .btn-download:hover { background: #357abd; }
+        .btn-confirm { background: #2e7d32; display: none; }
+        .btn-confirm:hover { background: #1b5e20; }
+
+        .format-menu {
+            display: none;
+            margin-top: 12px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 12px;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .format-menu.active { display: flex; }
+        .format-menu button {
+            padding: 6px 14px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background: #333;
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .format-menu button:hover { background: #4a90d9; border-color: #4a90d9; }
+        .format-menu button.selected { background: #4a90d9; border-color: #4a90d9; }
+
+        #folder { display: none; }
+        .custom-btn {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #4a90d9;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .custom-btn:hover { background: #357abd; }
+        .file-name { margin-left: 10px; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Galerie des images d'un dossier local</h1>
+    <p>Tu pourras cliquer sur une image pour la convertir et la télécharger au format de ton choix.</p>
+
+    <input type="file" id="folder" webkitdirectory multiple>
+    <label class="custom-btn" for="folder">Sélectionne un dossier</label>
+    <span class="file-name" id="fileName">Aucune image : clique sur le bouton</span>
+
+    <div class="gallery" id="gallery"></div>
+    <div class="lightbox" id="lightbox">
+        <img id="lightbox-img" src="" alt="">
+        <div class="lightbox-label" id="lightbox-label"></div>
+        <div class="export-bar" id="export-bar">
+            <button class="btn-download" id="btn-open-menu">⬇ Télécharger</button>
+            <button class="btn-confirm" id="btn-confirm">OK</button>
+        </div>
+        <div class="format-menu" id="format-menu">
+            <button data-format="png">PNG</button>
+            <button data-format="jpeg">JPG</button>
+            <button data-format="webp">WebP</button>
+            <button data-format="bmp">BMP</button>
+            <button data-format="ico">ICO (intègre 3 formats)</button>
+            <button data-format="svg">SVG</button>
+            <button data-format="pdf">PDF</button>
+        </div>
+    </div>
+
+    <script>
+        const gallery = document.getElementById('gallery');
+        const lightbox = document.getElementById('lightbox');
+        const lightboxImg = document.getElementById('lightbox-img');
+        const lightboxLabel = document.getElementById('lightbox-label');
+        const fileName = document.getElementById('fileName');
+        const folderInput = document.getElementById('folder');
+        const btnOpenMenu = document.getElementById('btn-open-menu');
+        const btnConfirm = document.getElementById('btn-confirm');
+        const formatMenu = document.getElementById('format-menu');
+        const exportBar = document.getElementById('export-bar');
+
+        let currentFile = null;
+        let selectedFormat = null;
+
+        const OPAQUE_FORMATS = ['jpeg', 'bmp'];
+
+        folderInput.addEventListener('change', function(e) {
+            gallery.innerHTML = '';
+            let files = [...e.target.files].filter(f => f.type.startsWith('image/'));
+
+            const hasSubdirs = files.some(f => f.webkitRelativePath.split('/').length > 2);
+
+            if (hasSubdirs && !confirm('Des sous-dossiers contenant des images ont été détectés.\nInclure les images des sous-dossiers ?')) {
+                files = files.filter(f => f.webkitRelativePath.split('/').length === 2);
+            }
+
+            fileName.textContent = files.length + ' image(s) trouvée(s)';
+
+            const groups = {};
+            files.forEach(file => {
+                const parts = file.webkitRelativePath.split('/');
+                const folder = parts.length > 2 ? parts.slice(1, -1).join('/') : '';
+                if (!groups[folder]) groups[folder] = [];
+                groups[folder].push(file);
+            });
+
+            for (const [folder, imgs] of Object.entries(groups)) {
+                if (folder) {
+                    const title = document.createElement('div');
+                    title.className = 'section-title';
+                    title.textContent = '📁 ' + folder;
+                    gallery.appendChild(title);
+                }
+
+                imgs.forEach(file => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'img-wrapper';
+
+                    const img = document.createElement('img');
+                    img.src = URL.createObjectURL(file);
+                    img.alt = file.name;
+                    img.title = file.webkitRelativePath;
+                    img.addEventListener('click', () => {
+                        currentFile = file;
+                        selectedFormat = null;
+                        resetExportUI();
+                        lightboxImg.src = img.src;
+                        lightboxImg.alt = file.name;
+                        lightboxLabel.textContent = file.name;
+                        lightbox.classList.add('active');
+                    });
+
+                    const label = document.createElement('div');
+                    label.className = 'file-label';
+                    label.textContent = file.name;
+
+                    wrapper.appendChild(img);
+                    wrapper.appendChild(label);
+                    gallery.appendChild(wrapper);
+                });
+            }
+        });
+
+        lightbox.addEventListener('click', (e) => {
+            if (e.target === lightbox) lightbox.classList.remove('active');
+        });
+        exportBar.addEventListener('click', (e) => e.stopPropagation());
+        formatMenu.addEventListener('click', (e) => e.stopPropagation());
+
+        btnOpenMenu.addEventListener('click', () => {
+            formatMenu.classList.toggle('active');
+        });
+
+        formatMenu.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                formatMenu.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                selectedFormat = btn.dataset.format;
+                formatMenu.classList.remove('active');
+                btnOpenMenu.style.display = 'none';
+                btnConfirm.style.display = 'inline-block';
+            });
+        });
+
+        btnConfirm.addEventListener('click', () => {
+            if (!currentFile || !selectedFormat) return;
+
+            const baseName = currentFile.name.replace(/\.[^.]+$/, '');
+
+            const runConversion = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = lightboxImg.naturalWidth;
+                canvas.height = lightboxImg.naturalHeight;
+                const ctx = canvas.getContext('2d');
+
+                if (OPAQUE_FORMATS.includes(selectedFormat)) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+
+                ctx.drawImage(lightboxImg, 0, 0);
+
+                switch (selectedFormat) {
+                    case 'png':
+                        canvas.toBlob(blob => downloadBlob(blob, baseName + '.png'), 'image/png');
+                        break;
+                    case 'jpeg':
+                        canvas.toBlob(blob => downloadBlob(blob, baseName + '.jpg'), 'image/jpeg', 0.92);
+                        break;
+                    case 'webp':
+                        canvas.toBlob(blob => downloadBlob(blob, baseName + '.webp'), 'image/webp', 0.92);
+                        break;
+                    case 'bmp':
+                        downloadBlob(canvasToBMP(canvas), baseName + '.bmp');
+                        break;
+                    case 'ico':
+                        downloadBlob(canvasToMultiSizeICO(ctx.getImageData(0, 0, canvas.width, canvas.height)), baseName + '.ico');
+                        break;
+                    case 'svg': {
+                        const dataUrl = canvas.toDataURL('image/png');
+                        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}"><image width="${canvas.width}" height="${canvas.height}" href="${dataUrl}"/></svg>`;
+                        downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), baseName + '.svg');
+                        break;
+                    }
+                    case 'pdf': {
+                        const { jsPDF } = window.jspdf;
+                        const imgData = canvas.toDataURL('image/png');
+                        const orientation = canvas.width > canvas.height ? 'l' : 'p';
+                        const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height] });
+                        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+                        pdf.save(baseName + '.pdf');
+                        break;
+                    }
+                }
+                resetExportUI();
+            };
+
+            if (lightboxImg.complete && lightboxImg.naturalWidth > 0) {
+                runConversion();
+            } else {
+                lightboxImg.onload = runConversion;
+            }
+        });
+
+        function resetExportUI() {
+            formatMenu.classList.remove('active');
+            formatMenu.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
+            btnOpenMenu.style.display = 'inline-block';
+            btnConfirm.style.display = 'none';
+            selectedFormat = null;
+        }
+
+        function downloadBlob(blob, filename) {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }
+
+        function canvasToBMP(canvas) {
+            const ctx = canvas.getContext('2d');
+            const { width, height } = canvas;
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const data = imageData.data;
+            const rowSize = Math.ceil((width * 3) / 4) * 4;
+            const pixelArraySize = rowSize * height;
+            const fileSize = 54 + pixelArraySize;
+            const buffer = new ArrayBuffer(fileSize);
+            const view = new DataView(buffer);
+            view.setUint8(0, 0x42); view.setUint8(1, 0x4D);
+            view.setUint32(2, fileSize, true);
+            view.setUint32(10, 54, true);
+            view.setUint32(14, 40, true);
+            view.setInt32(18, width, true);
+            view.setInt32(22, height, true);
+            view.setUint16(26, 1, true);
+            view.setUint16(28, 24, true);
+            view.setUint32(30, 0, true);
+            view.setUint32(34, pixelArraySize, true);
+            view.setUint32(38, 2835, true);
+            view.setUint32(42, 2835, true);
+            view.setUint32(46, 0, true);
+            view.setUint32(50, 0, true);
+            let offset = 54;
+            for (let y = height - 1; y >= 0; y--) {
+                for (let x = 0; x < width; x++) {
+                    const i = (y * width + x) * 4;
+                    view.setUint8(offset++, data[i + 2]);
+                    view.setUint8(offset++, data[i + 1]);
+                    view.setUint8(offset++, data[i]);
+                }
+                offset += rowSize - width * 3;
+            }
+            return new Blob([buffer], { type: 'image/bmp' });
+        }
+
+        function canvasToMultiSizeICO(imageData) {
+            if (!imageData || !imageData.width || !imageData.height) {
+                throw new Error("ImageData invalide");
+            }
+
+            const sizes = [256, 128, 48];
+            const entries = [];
+
+            for (let i = 0; i < sizes.length; i++) {
+                const size = sizes[i];
+
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = imageData.width;
+                tempCanvas.height = imageData.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.putImageData(imageData, 0, 0);
+
+                const scaledCanvas = document.createElement('canvas');
+                scaledCanvas.width = size;
+                scaledCanvas.height = size;
+                const sctx = scaledCanvas.getContext('2d');
+
+                sctx.imageSmoothingEnabled = true;
+                sctx.imageSmoothingQuality = 'high';
+                sctx.drawImage(tempCanvas, 0, 0, size, size);
+
+                const dataUrl = scaledCanvas.toDataURL('image/png');
+                const base64Data = dataUrl.split(',')[1];
+                const binString = atob(base64Data);
+                const bytes = new Uint8Array(binString.length);
+                for (let j = 0; j < binString.length; j++) {
+                    bytes[j] = binString.charCodeAt(j);
+                }
+
+                entries.push({
+                    w: size,
+                    h: size,
+                    size: bytes,
+                    planes: 1,
+                    bitCount: 32
+                });
+            }
+
+            const numEntries = entries.length;
+            const headerSize = 6 + numEntries * 16;
+            let offset = headerSize;
+
+            for (const e of entries) {
+                e.offset = offset;
+                offset += e.size.length;
+            }
+
+            const totalSize = offset;
+            const buf = new ArrayBuffer(totalSize);
+            const v = new DataView(buf);
+            const arr = new Uint8Array(buf);
+
+            v.setUint16(0, 0, true);
+            v.setUint16(2, 1, true);
+            v.setUint16(4, numEntries, true);
+
+            for (let i = 0; i < numEntries; i++) {
+                const e = entries[i];
+                const off = 6 + i * 16;
+
+                v.setUint8(off, e.w >= 256 ? 0 : e.w);
+                v.setUint8(off + 1, e.h >= 256 ? 0 : e.h);
+
+                v.setUint8(off + 2, 0);
+                v.setUint8(off + 3, 0);
+
+                v.setUint16(off + 4, e.planes, true);
+                v.setUint16(off + 6, e.bitCount, true);
+
+                v.setUint32(off + 8, e.size.length, true);
+                v.setUint32(off + 12, e.offset, true);
+            }
+
+            let pos = headerSize;
+            for (const e of entries) {
+                arr.set(e.size, pos);
+                pos += e.size.length;
+            }
+
+            return new Blob([buf], { type: 'image/x-icon' });
+        }
+
+        document.addEventListener('dragstart', e => {
+            if (e.target.tagName === 'IMG') e.preventDefault();
+        });
+    </script>
+</body>
+</html>
