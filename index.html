@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Galerie des images d'un dossier local</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #000; color: #fff; }
+        .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+        .img-wrapper { display: flex; flex-direction: column; align-items: center; }
+        .img-wrapper img { width: 100%; height: auto; border-radius: 4px; cursor: pointer; }
+        .file-label { text-align: center; font-size: 12px; color: #aaa; margin-top: 4px; word-break: break-all; }
+        .section-title {
+			grid-column: 1 / -1;
+			font-size: 18px;
+			font-weight: bold;
+			color: #4a90d9;
+			border-bottom: 4px solid #4a90d9;  
+			padding-bottom: 6px;
+			margin-top: 40px;     
+		}
+        .lightbox {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.9);
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            flex-direction: column;
+        }
+        .lightbox img {
+    pointer-events: auto; /* S'assure que le clic est bien capté */
+    user-select: none;    /* Empêche la sélection de texte */
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    -webkit-user-drag: none; /* Empêche le drag accidentel */
+}
+        .lightbox .lightbox-label {
+            color: #ccc;
+            font-size: 14px;
+            margin-top: 12px;
+            word-break: break-all;
+            text-align: center;
+        }
+        .lightbox.active { display: flex; }
+
+        .export-bar {
+            margin-top: 16px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            cursor: default;
+        }
+        .export-bar button {
+            padding: 6px 14px;
+            border-radius: 4px;
+            border: none;
+            font-size: 14px;
+            color: #fff;
+            cursor: pointer;
+        }
+        .btn-download { background: #4a90d9; }
+        .btn-download:hover { background: #357abd; }
+        .btn-confirm { background: #2e7d32; display: none; }
+        .btn-confirm:hover { background: #1b5e20; }
+
+        .format-menu {
+            display: none;
+            margin-top: 12px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 12px;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .format-menu.active { display: flex; }
+        .format-menu button {
+            padding: 6px 14px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background: #333;
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .format-menu button:hover { background: #4a90d9; border-color: #4a90d9; }
+        .format-menu button.selected { background: #4a90d9; border-color: #4a90d9; }
+
+        #folder { display: none; }
+        .custom-btn {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #4a90d9;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .custom-btn:hover { background: #357abd; }
+        .file-name { margin-left: 10px; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Galerie des images d'un dossier local</h1>
+    <p>Tu pourras cliquer sur une image pour la convertir et la télécharger au format de ton choix.</p>
+
+    <input type="file" id="folder" webkitdirectory multiple>
+    <label class="custom-btn" for="folder">Sélectionne un dossier</label>
+    <span class="file-name" id="fileName">Aucune image : clique sur le bouton</span>
+
+    <div class="gallery" id="gallery"></div>
+    <div class="lightbox" id="lightbox">
+        <img id="lightbox-img" src="" alt="">
+        <div class="lightbox-label" id="lightbox-label"></div>
+        <div class="export-bar" id="export-bar">
+            <button class="btn-download" id="btn-open-menu">⬇ Télécharger</button>
+            <button class="btn-confirm" id="btn-confirm">OK</button>
+        </div>
+        <div class="format-menu" id="format-menu">
+            <button data-format="original">Format d'origine</button>
+            <button data-format="png">PNG</button>
+            <button data-format="jpeg">JPG</button>
+            <button data-format="webp">WebP</button>
+            <button data-format="bmp">BMP</button>
+            <button data-format="ico">ICO (32+128+256)</button>
+            <button data-format="gif">GIF</button>
+            <button data-format="svg">SVG</button>
+            <button data-format="pdf">PDF</button>
+        </div>
+    </div>
+
+    <script>
+        const gallery = document.getElementById('gallery');
+        const lightbox = document.getElementById('lightbox');
+        const lightboxImg = document.getElementById('lightbox-img');
+        const lightboxLabel = document.getElementById('lightbox-label');
+        const fileName = document.getElementById('fileName');
+        const folderInput = document.getElementById('folder');
+        const btnOpenMenu = document.getElementById('btn-open-menu');
+        const btnConfirm = document.getElementById('btn-confirm');
+        const formatMenu = document.getElementById('format-menu');
+        const exportBar = document.getElementById('export-bar');
+
+        let currentFile = null;
+        let selectedFormat = null;
+
+        // ── Chargement du dossier ──
+        folderInput.addEventListener('change', function(e) {
+            gallery.innerHTML = '';
+            let files = [...e.target.files].filter(f => f.type.startsWith('image/'));
+
+            const hasSubdirs = files.some(f => f.webkitRelativePath.split('/').length > 2);
+
+            if (hasSubdirs && !confirm('Des sous-dossiers contenant des images ont été détectés.\nInclure les images des sous-dossiers ?')) {
+                files = files.filter(f => f.webkitRelativePath.split('/').length === 2);
+            }
+
+            fileName.textContent = files.length + ' image(s) trouvée(s)';
+
+            const groups = {};
+            files.forEach(file => {
+                const parts = file.webkitRelativePath.split('/');
+                const folder = parts.length > 2 ? parts.slice(1, -1).join('/') : '';
+                if (!groups[folder]) groups[folder] = [];
+                groups[folder].push(file);
+            });
+
+            for (const [folder, imgs] of Object.entries(groups)) {
+                if (folder) {
+                    const title = document.createElement('div');
+                    title.className = 'section-title';
+                    title.textContent = '📁 ' + folder;
+                    gallery.appendChild(title);
+                }
+
+                imgs.forEach(file => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'img-wrapper';
+
+                    const img = document.createElement('img');
+                    img.src = URL.createObjectURL(file);
+                    img.alt = file.name;
+                    img.title = file.webkitRelativePath;
+                    img.addEventListener('click', () => {
+                        currentFile = file;
+                        selectedFormat = null;
+                        resetExportUI();
+                        lightboxImg.src = img.src;
+                        lightboxImg.alt = file.name;
+                        lightboxLabel.textContent = file.name;
+                        lightbox.classList.add('active');
+                    });
+
+                    const label = document.createElement('div');
+                    label.className = 'file-label';
+                    label.textContent = file.name;
+
+                    wrapper.appendChild(img);
+                    wrapper.appendChild(label);
+                    gallery.appendChild(wrapper);
+                });
+            }
+        });
+
+        // ── Fermer lightbox ──
+        lightbox.addEventListener('click', (e) => {
+            if (e.target === lightbox) lightbox.classList.remove('active');
+        });
+        exportBar.addEventListener('click', (e) => e.stopPropagation());
+        formatMenu.addEventListener('click', (e) => e.stopPropagation());
+
+        // ── Ouvrir le menu de formats ──
+        btnOpenMenu.addEventListener('click', () => {
+            formatMenu.classList.toggle('active');
+        });
+
+        // ── Sélectionner un format ──
+        formatMenu.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                formatMenu.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                selectedFormat = btn.dataset.format;
+                formatMenu.classList.remove('active');
+                btnOpenMenu.style.display = 'none';
+                btnConfirm.style.display = 'inline-block';
+            });
+        });
+
+        // ── Bouton OK : conversion et téléchargement ──
+        btnConfirm.addEventListener('click', () => {
+            if (!currentFile || !selectedFormat) return;
+
+            const baseName = currentFile.name.replace(/\.[^.]+$/, '');
+
+            if (selectedFormat === 'original') {
+                downloadBlob(currentFile, currentFile.name);
+                resetExportUI();
+                return;
+            }
+
+                        const runConversion = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = lightboxImg.naturalWidth;
+                canvas.height = lightboxImg.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(lightboxImg, 0, 0);
+
+                switch (selectedFormat) {
+                    case 'png':
+                        canvas.toBlob(blob => downloadBlob(blob, baseName + '.png'), 'image/png');
+                        break;
+                    case 'jpeg':
+                        canvas.toBlob(blob => downloadBlob(blob, baseName + '.jpg'), 'image/jpeg', 0.92);
+                        break;
+                    case 'webp':
+                        canvas.toBlob(blob => downloadBlob(blob, baseName + '.webp'), 'image/webp', 0.92);
+                        break;
+                    case 'bmp':
+                        downloadBlob(canvasToBMP(canvas), baseName + '.bmp');
+                        break;
+                    case 'ico':
+                        downloadBlob(canvasToMultiSizeICO(ctx.getImageData(0, 0, canvas.width, canvas.height)), baseName + '.ico');
+                        break;
+                    case 'gif':
+                        downloadBlob(canvasToGIF(canvas), baseName + '.gif');
+                        break;
+                    case 'svg': {
+                        const dataUrl = canvas.toDataURL('image/png');
+                        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}"><image width="${canvas.width}" height="${canvas.height}" href="${dataUrl}"/></svg>`;
+                        downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), baseName + '.svg');
+                        break;
+                    }
+                    case 'pdf': {
+                        const { jsPDF } = window.jspdf;
+                        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+                        const orientation = canvas.width > canvas.height ? 'l' : 'p';
+                        const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height] });
+                        pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height);
+                        pdf.save(baseName + '.pdf');
+                        break;
+                    }
+                }
+                resetExportUI();
+            };
+
+            // ✅ FIX : l'image est souvent déjà chargée → onload ne se déclenche jamais
+            if (lightboxImg.complete && lightboxImg.naturalWidth > 0) {
+                runConversion();
+            } else {
+                lightboxImg.onload = runConversion;
+            }
+        });
+
+        function resetExportUI() {
+            formatMenu.classList.remove('active');
+            formatMenu.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
+            btnOpenMenu.style.display = 'inline-block';
+            btnConfirm.style.display = 'none';
+            selectedFormat = null;
+        }
+
+        function downloadBlob(blob, filename) {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }
+
+        function canvasToBMP(canvas) {
+            const ctx = canvas.getContext('2d');
+            const { width, height } = canvas;
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const data = imageData.data;
+            const rowSize = Math.ceil((width * 3) / 4) * 4;
+            const pixelArraySize = rowSize * height;
+            const fileSize = 54 + pixelArraySize;
+            const buffer = new ArrayBuffer(fileSize);
+            const view = new DataView(buffer);
+            view.setUint8(0, 0x42); view.setUint8(1, 0x4D);
+            view.setUint32(2, fileSize, true);
+            view.setUint32(10, 54, true);
+            view.setUint32(14, 40, true);
+            view.setInt32(18, width, true);
+            view.setInt32(22, height, true);
+            view.setUint16(26, 1, true);
+            view.setUint16(28, 24, true);
+            view.setUint32(30, 0, true);
+            view.setUint32(34, pixelArraySize, true);
+            view.setUint32(38, 2835, true);
+            view.setUint32(42, 2835, true);
+            view.setUint32(46, 0, true);
+            view.setUint32(50, 0, true);
+            let offset = 54;
+            for (let y = height - 1; y >= 0; y--) {
+                for (let x = 0; x < width; x++) {
+                    const i = (y * width + x) * 4;
+                    view.setUint8(offset++, data[i + 2]);
+                    view.setUint8(offset++, data[i + 1]);
+                    view.setUint8(offset++, data[i]);
+                }
+                offset += rowSize - width * 3;
+            }
+            return new Blob([buffer], { type: 'image/bmp' });
+        }
+
+     
+function canvasToMultiSizeICO(imageData) {
+    // Vérification de sécurité : s'assurer que imageData a des dimensions valides
+    if (!imageData || !imageData.width || !imageData.height) {
+        throw new Error("ImageData invalide");
+    }
+
+    const sizes = [256, 128, 32]; // Ordre décroissant recommandé pour certains parsers
+    const entries = [];
+
+    // Créer une source unique pour éviter de recréer le tempCanvas à chaque boucle si possible
+    // Mais ici on garde votre approche qui est sûre
+    
+    for (let i = 0; i < sizes.length; i++) {
+        const size = sizes[i];
+        
+        // Canvas temporaire contenant l'image originale
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = imageData.width;
+        tempCanvas.height = imageData.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.putImageData(imageData, 0, 0);
+
+        // Canvas de destination avec la taille cible
+        const scaledCanvas = document.createElement('canvas');
+        scaledCanvas.width = size;
+        scaledCanvas.height = size;
+        const sctx = scaledCanvas.getContext('2d');
+        
+        // Important : Activer le lissage pour une meilleure qualité de réduction
+        sctx.imageSmoothingEnabled = true;
+        sctx.imageSmoothingQuality = 'high';
+
+        // Dessiner l'image redimensionnée
+        // Note : Si l'image originale n'est pas carrée, cela va la déformer. 
+        // Si vous voulez garder le ratio, il faut calculer les offsets, mais pour un .ico c'est souvent carré.
+        sctx.drawImage(tempCanvas, 0, 0, size, size);
+
+        // Récupérer les données PNG
+        const dataUrl = scaledCanvas.toDataURL('image/png');
+        const base64Data = dataUrl.split(',')[1];
+        const binString = atob(base64Data);
+        const bytes = new Uint8Array(binString.length);
+        for (let j = 0; j < binString.length; j++) {
+            bytes[j] = binString.charCodeAt(j);
+        }
+        
+        entries.push({ 
+            w: size, 
+            h: size, 
+            size: bytes,
+            // Pour les PNG dans ICO, certains outils préfèrent planes/bitcount à 0
+            // Mais gardons 1/32 comme vous l'aviez, c'est toléré par la plupart des navigateurs modernes
+            planes: 1, 
+            bitCount: 32 
+        });
+    }
+
+    const numEntries = entries.length;
+    const headerSize = 6 + numEntries * 16;
+    let offset = headerSize;
+    
+    // Calcul des offsets
+    for (const e of entries) {
+        e.offset = offset;
+        offset += e.size.length;
+    }
+
+    const totalSize = offset;
+    const buf = new ArrayBuffer(totalSize);
+    const v = new DataView(buf);
+    const arr = new Uint8Array(buf);
+
+    // --- ICONDIR Header ---
+    v.setUint16(0, 0, true);          // Reserved
+    v.setUint16(2, 1, true);          // Type: 1 = Icon
+    v.setUint16(4, numEntries, true); // Count
+
+    // --- ICONDIRENTRY Table ---
+    for (let i = 0; i < numEntries; i++) {
+        const e = entries[i];
+        const off = 6 + i * 16;
+        
+        // Width and Height (0 means 256)
+        v.setUint8(off, e.w >= 256 ? 0 : e.w);
+        v.setUint8(off + 1, e.h >= 256 ? 0 : e.h);
+        
+        v.setUint8(off + 2, 0);       // Color count (0 for >256 colors)
+        v.setUint8(off + 3, 0);       // Reserved
+        
+        v.setUint16(off + 4, e.planes, true);   // Color planes
+        v.setUint16(off + 6, e.bitCount, true); // Bits per pixel
+        
+        v.setUint32(off + 8, e.size.length, true); // Size of resource data
+        v.setUint32(off + 12, e.offset, true);     // Offset to resource data
+    }
+
+    // --- Écrire les données des images ---
+    let pos = headerSize;
+    for (const e of entries) {
+        arr.set(e.size, pos);
+        pos += e.size.length;
+    }
+
+    return new Blob([buf], { type: 'image/x-icon' });
+}
+
+        function canvasToGIF(canvas) {
+            const ctx = canvas.getContext('2d');
+            const { width, height } = canvas;
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const pixels = imageData.data;
+
+            const palette = medianCut(pixels, width, height, 256);
+            const indexed = new Uint8Array(width * height);
+
+            for (let i = 0; i < width * height; i++) {
+                const r = pixels[i * 4], g = pixels[i * 4 + 1], b = pixels[i * 4 + 2], a = pixels[i * 4 + 3];
+                if (a < 128) {
+                    indexed[i] = 0;
+                } else {
+                    let bestDist = Infinity, bestIdx = 0;
+                    for (let j = 0; j < palette.length; j++) {
+                        const dr = r - palette[j][0], dg = g - palette[j][1], db = b - palette[j][2];
+                        const dist = dr * dr + dg * dg + db * db;
+                        if (dist < bestDist) { bestDist = dist; bestIdx = j; }
+                    }
+                    indexed[i] = bestIdx;
+                }
+            }
+
+            return buildGIF(indexed, width, height, palette);
+        }
+
+        function medianCut(data, w, h, maxColors) {
+            const pixelList = [];
+            for (let i = 0; i < w * h; i++) {
+                if (data[i * 4 + 3] >= 128) {
+                    pixelList.push([data[i * 4], data[i * 4 + 1], data[i * 4 + 2]]);
+                }
+            }
+            if (pixelList.length === 0) {
+                const p = []; for (let i = 0; i < maxColors; i++) p.push([0, 0, 0]); return p;
+            }
+            const boxes = [pixelList];
+            while (boxes.length < maxColors) {
+                let maxVol = -1, maxIdx = -1;
+                for (let i = 0; i < boxes.length; i++) {
+                    const vol = colorVolume(boxes[i]);
+                    if (vol > maxVol) { maxVol = vol; maxIdx = i; }
+                }
+                if (maxIdx === -1 || maxVol === 0) break;
+                const box = boxes[maxIdx];
+                const ch = longestChannel(box);
+                box.sort((a, b) => a[ch] - b[ch]);
+                const mid = Math.floor(box.length / 2);
+                boxes.splice(maxIdx, 1, box.slice(0, mid), box.slice(mid));
+            }
+            return boxes.map(box => {
+                let r = 0, g = 0, b = 0, count = box.length;
+                for (const p of box) { r += p[0]; g += p[1]; b += p[2]; }
+                return [Math.round(r / count), Math.round(g / count), Math.round(b / count)];
+            });
+        }
+
+        function colorVolume(box) {
+            let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0;
+            for (const p of box) {
+                if (p[0] < rMin) rMin = p[0]; if (p[0] > rMax) rMax = p[0];
+                if (p[1] < gMin) gMin = p[1]; if (p[1] > gMax) gMax = p[1];
+                if (p[2] < bMin) bMin = p[2]; if (p[2] > bMax) bMax = p[2];
+            }
+            return (rMax - rMin) * (gMax - gMin) * (bMax - bMin);
+        }
+
+        function longestChannel(box) {
+            let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0;
+            for (const p of box) {
+                if (p[0] < rMin) rMin = p[0]; if (p[0] > rMax) rMax = p[0];
+                if (p[1] < gMin) gMin = p[1]; if (p[1] > gMax) gMax = p[1];
+                if (p[2] < bMin) bMin = p[2]; if (p[2] > bMax) bMax = p[2];
+            }
+            const rr = rMax - rMin, gg = gMax - gMin, bb = bMax - bMin;
+            if (rr >= gg && rr >= bb) return 0;
+            if (gg >= rr && gg >= bb) return 1;
+            return 2;
+        }
+
+        function buildGIF(indexed, w, h, palette) {
+            const buf = new ArrayBuffer(13 + 256 * 3 + 200);
+            const v = new DataView(buf);
+            const arr = new Uint8Array(buf);
+            let pos = 0;
+
+            for (const c of "GIF89a") arr[pos++] = c.charCodeAt(0);
+
+            v.setUint16(pos, w, true); pos += 2;
+            v.setUint16(pos, h, true); pos += 2;
+            arr[pos++] = 0xF7;
+            arr[pos++] = 0;
+            arr[pos++] = 0;
+
+            for (let i = 0; i < 256; i++) {
+                if (i < palette.length) {
+                    arr[pos++] = palette[i][0];
+                    arr[pos++] = palette[i][1];
+                    arr[pos++] = palette[i][2];
+                } else { arr[pos++] = 0; arr[pos++] = 0; arr[pos++] = 0; }
+            }
+
+            arr[pos++] = 0x21; arr[pos++] = 0xF9; arr[pos++] = 5; arr[pos++] = 1;
+            v.setUint16(pos, 0, true); pos += 2;
+            arr[pos++] = 0; arr[pos++] = 0;
+
+            arr[pos++] = 0x2C;
+            v.setUint16(pos, 0, true); pos += 2;
+            v.setUint16(pos, 0, true); pos += 2;
+            v.setUint16(pos, w, true); pos += 2;
+            v.setUint16(pos, h, true); pos += 2;
+            arr[pos++] = 0;
+
+            const minCodeSize = Math.max(2, Math.ceil(Math.log2(palette.length)) - 1);
+            const compressed = lzwEncode(indexed, minCodeSize);
+            arr[pos++] = minCodeSize;
+
+            for (let i = 0; i < compressed.length; i += 255) {
+                const chunkSize = Math.min(255, compressed.length - i);
+                arr[pos++] = chunkSize;
+                for (let j = 0; j < chunkSize; j++) arr[pos++] = compressed[i + j];
+            }
+            arr[pos++] = 0;
+            arr[pos++] = 0x3B;
+
+            return new Blob([buf], { type: 'image/gif' });
+        }
+
+        function lzwEncode(data, minCodeSize) {
+            const clearCode = 1 << minCodeSize;
+            const eoiCode = clearCode + 1;
+            let nextCode = eoiCode + 1;
+            const maxCode = Math.min(4095, 1 << 12);
+            const dictionary = new Map();
+            for (let i = 0; i < clearCode; i++) dictionary.set(String.fromCharCode(i), i);
+
+            const output = [];
+            let bitBuffer = 0, bitCount = 0;
+
+            function writeBits(code, bits) {
+                bitBuffer |= code << bitCount;
+                bitCount += bits;
+                while (bitCount >= 8) {
+                    output.push(bitBuffer & 0xFF);
+                    bitBuffer >>= 8;
+                    bitCount -= 8;
+                }
+            }
+
+            writeBits(clearCode, minCodeSize + 1);
+            let prefix = data[0];
+
+            for (let i = 1; i < data.length; i++) {
+                const suffix = data[i];
+                const key = prefix + ',' + suffix;
+
+                if (dictionary.has(key)) {
+                    prefix = dictionary.get(key);
+                } else {
+                    writeBits(prefix, minCodeSize + 1);
+
+                    if (nextCode < maxCode) {
+                        dictionary.set(key, nextCode++);
+                    } else {
+                        writeBits(clearCode, minCodeSize + 1);
+                        dictionary.clear();
+                        for (let j = 0; j < clearCode; j++) dictionary.set(String.fromCharCode(j), j);
+                        nextCode = eoiCode + 1;
+                    }
+                    prefix = suffix;
+                }
+            }
+
+            writeBits(prefix, minCodeSize + 1);
+            writeBits(eoiCode, minCodeSize + 1);
+
+            if (bitCount > 0) output.push(bitBuffer & 0xFF);
+            return output;
+        }
+		// Empêche le drag des images (évite le bug où les clics ne fonctionnent plus après)
+document.addEventListener('dragstart', e => {
+    if (e.target.tagName === 'IMG') e.preventDefault();
+});
+    </script>
+</body>
+</html>
