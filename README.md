@@ -16,6 +16,14 @@ PAGE directement utilisable ici :
 [https://mephisto68.github.io/View-picture-and-converter](https://mephisto68.github.io/View-picture-and-converter/)
 
 
-Capture :
+Captures :
 
-![capture](capture.png)
+![capture](capture1.png) ![capture](capture.png)
+
+## Comment utiliser
+1. Sélectionnez un dossier contenant vos images.
+2. Accepter l'import
+3. Accepter ou annuler l'import des sous-dossier
+4. Cliquez sur une image
+5. Choisissez le format de sortie souhaité.
+6. Cliquez sur "Ok".
