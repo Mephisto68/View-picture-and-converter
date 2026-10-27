@@ -28,5 +28,5 @@ Capture :
 5. Choisissez le format de sortie souhaité.
 6. Cliquez sur "Ok".
 7. Selectionner une autre image ou un autre dossier
-8. Pour annuler la conversion il suffit a tout moment de cliquer en dehors de l'image
-9. Merci à l'IA Leo
+8. Pour annuler la conversion il suffit à tout moment de cliquer en dehors de l'image.
+9. Merci à l'IA Leo !
