@@ -16,7 +16,7 @@ PAGE directement utilisable ici :
 [https://mephisto68.github.io/View-picture-and-converter](https://mephisto68.github.io/View-picture-and-converter/)
 
 
-Captures :
+Capture :
 
 ![capture](capture.png)
 
