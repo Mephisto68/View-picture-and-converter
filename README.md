@@ -20,7 +20,7 @@ Capture :
 
 ![capture](capture.png)
 
-## Comment utiliser
+## Comment l'utiliser :
 1. Sélectionnez un dossier contenant vos images.
 2. Accepter l'import
 3. Accepter ou annuler l'import des sous-dossier
