@@ -137,15 +137,16 @@
             <button class="btn-download" id="btn-open-menu">⬇ Convertir</button>
             <button class="btn-confirm" id="btn-confirm">OK</button>
         </div>
-        <div class="format-menu" id="format-menu">
-            <button data-format="png">PNG</button>
-            <button data-format="jpeg">JPG</button>
-            <button data-format="webp">WebP</button>
-            <button data-format="bmp">BMP</button>
-            <button data-format="ico">ICO (intègre 3 formats)</button>
-            <button data-format="svg">SVG</button>
-            <button data-format="pdf">PDF</button>
-        </div>
+		<div class="format-menu" id="format-menu">
+			<button data-format="png">PNG</button>
+			<button data-format="png2000">PNG 2000px (taille max !)</button>
+			<button data-format="jpeg">JPG</button>
+			<button data-format="webp">WebP</button>
+			<button data-format="bmp">BMP</button>
+			<button data-format="ico">ICO (intègre 3 formats)</button>
+			<button data-format="svg">SVG</button>
+			<button data-format="pdf">PDF</button>
+		</div>
     </div>
 
     <script>
@@ -265,6 +266,9 @@
                     case 'png':
                         canvas.toBlob(blob => downloadBlob(blob, baseName + '.png'), 'image/png');
                         break;
+					case 'png2000':
+						imageToPNG2000(lightboxImg).then(blob => downloadBlob(blob, baseName + '_2000.png'));
+						break;   
                     case 'jpeg':
                         canvas.toBlob(blob => downloadBlob(blob, baseName + '.jpg'), 'image/jpeg', 0.92);
                         break;
@@ -354,8 +358,35 @@
                 offset += rowSize - width * 3;
             }
             return new Blob([buffer], { type: 'image/bmp' });
-        }
+		}
 
+		function imageToPNG2000(img) {
+			const MIN = 2000;
+			const nw = img.naturalWidth;
+			const nh = img.naturalHeight;
+		
+			let outW, outH;
+			if (nw <= nh) {
+				outW = MIN;
+				outH = Math.round(nh * MIN / nw);
+			} else {
+				outH = MIN;
+				outW = Math.round(nw * MIN / nh);
+			}
+		
+			const canvas = document.createElement('canvas');
+			canvas.width = outW;
+			canvas.height = outH;
+			const ctx = canvas.getContext('2d');
+			ctx.imageSmoothingEnabled = true;
+			ctx.imageSmoothingQuality = 'high';
+			ctx.drawImage(img, 0, 0, outW, outH);
+		
+			return new Promise(resolve => {
+				canvas.toBlob(blob => resolve(blob), 'image/png');
+			});
+		}
+		
         function canvasToMultiSizeICO(imageData) {
             if (!imageData || !imageData.width || !imageData.height) {
                 throw new Error("ImageData invalide");
